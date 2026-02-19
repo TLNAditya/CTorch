@@ -1,42 +1,81 @@
 #include "Tensor.h"
-#include <stdexcept>
-using namespace std;
+#include "../core/autograd/GradFn.h"
+
 namespace ctorch {
 
-Tensor::Tensor(const std::vector<std::vector<double>>& data,bool requires_grad): 
-    data(data), requires_grad(requires_grad)
+Tensor::Tensor(const std::vector<std::vector<double>>& data,
+               bool requires_grad,
+               const std::string& device)
+    : data(data),
+      requires_grad(requires_grad),
+      device(device),
+      grad_fn(nullptr)
 {
-    if (data.empty())
-        throw std::invalid_argument("Tensor data cannot be empty");
+    shape = {static_cast<int>(data.size()),
+             static_cast<int>(data.empty() ? 0 : data[0].size())};
 
-    int r = data.size();
-    int c = data[0].size();
+    grad.resize(shape[0], std::vector<double>(shape[1], 0.0));
+}
 
-    for (auto& row : data) {
-        if (row.size() != c)
-            throw std::invalid_argument("Inconsistent row sizes");
+void Tensor::backward() {
+    if (!requires_grad)
+        return;
+
+    // Initialize gradient of final tensor to 1
+    for (int i = 0; i < rows(); ++i)
+        for (int j = 0; j < cols(); ++j)
+            grad[i][j] = 1.0;
+
+    if (grad_fn) {
+        grad_fn->backward(shared_from_this());
     }
-
-    shape = {r, c};
 }
 
 std::vector<std::vector<double>> Tensor::T() const {
-    int r = shape[0], c = shape[1];
-    std::vector<std::vector<double>> t(c, std::vector<double>(r));
+    std::vector<std::vector<double>> transposed(cols(),
+        std::vector<double>(rows()));
 
-    for (int i = 0; i < r; i++)
-        for (int j = 0; j < c; j++)
-            t[j][i] = data[i][j];
+    for (int i = 0; i < rows(); ++i)
+        for (int j = 0; j < cols(); ++j)
+            transposed[j][i] = data[i][j];
 
-    return t;
+    return transposed;
 }
 
-int Tensor::rows() const { return shape[0]; }
-int Tensor::cols() const { return shape[1]; }
-const vector<vector<double>>& Tensor::get_data()const{return data;}
-bool Tensor::requires_grad_enabled() const{return requires_grad;}
-void Tensor::backward() {
-   
+int Tensor::rows() const {
+    return shape[0];
 }
 
-} 
+int Tensor::cols() const {
+    return shape[1];
+}
+
+const std::vector<std::vector<double>>& Tensor::get_data() const {
+    return data;
+}
+
+const std::vector<std::vector<double>>& Tensor::get_grad() const {
+    return grad;
+}
+
+bool Tensor::requires_grad_enabled() const {
+    return requires_grad;
+}
+
+void Tensor::set_grad_fn(std::shared_ptr<GradFn> fn) {
+    grad_fn = fn;
+}
+
+std::shared_ptr<GradFn> Tensor::get_grad_fn() const {
+    return grad_fn;
+}
+
+void Tensor::accumulate_grad(
+    const std::vector<std::vector<double>>& grad_input)
+{
+    for (int i = 0; i < rows(); ++i)
+        for (int j = 0; j < cols(); ++j)
+            grad[i][j] += grad_input[i][j];
+}
+
+}
